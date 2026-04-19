@@ -228,17 +228,21 @@ export default function CommandPanel() {
       title: '',
       key: 'actions',
       width: '8%',
-      render: (_, record) => (
-        <Tooltip title="Invoke command">
-          <Button
-            size="small"
-            type="primary"
-            ghost
-            icon={<PlayCircleOutlined />}
-            onClick={() => setInvokeCmd(record)}
-          />
-        </Tooltip>
-      ),
+      render: (_, record) => {
+        const hasInterval = commandIntervals.some((i) => i.commandName === record.displayName);
+        if (hasInterval) return null;
+        return (
+          <Tooltip title="Invoke command">
+            <Button
+              size="small"
+              type="primary"
+              ghost
+              icon={<PlayCircleOutlined />}
+              onClick={() => setInvokeCmd(record)}
+            />
+          </Tooltip>
+        );
+      },
     },
   ];
 
