@@ -6,28 +6,40 @@ import ScriptRunner from '../components/ScriptRunner';
 import ScriptFileManager from '../components/ScriptFileManager';
 import { useApp } from '../App';
 
-const DSL_REFERENCE = `ALWAYS { }       Repeat each line on its own independent timer
-ONSTART { }      Run once at startup (sequential, before ALWAYS)
-ONCE { }         Run once after ONSTART (sequential)
+const DSL_REFERENCE = `[TagName]                        Reference a tag (read or write target)
+[CmdName](args)                  Invoke a command
 
-── Repeating (ALWAYS block) ──────────────────────────────
-TAG = 100 every 10s          Set TAG to 100 every 10 s
-TAG = +10 every 20s          Increment TAG by 10 every 20 s
-TAG = -5 every 1s            Decrement TAG by 5 every 1 s
-INVOQUE CMD(a) every 5s      Invoke command every 5 s
+── Write / Read ──────────────────────────────────────────
+[TAG] = 100                      Write static value
+[TAG] = "text"                   Write string
+[TAG] = true                     Write boolean
+[TAG] = [TAGA] + [TAGB]          Write arithmetic expression
+[TAG] = [TAGA] + 100             Mix tag and literal
+[TAG] += 1                       One-time increment
+[TAG] -= 1                       One-time decrement
+myVar = [TAG]                    Read tag value into variable
+myVar = [Cmd.Name](a, b)         Execute command, store result
+[Cmd.Name](a, b)                 Execute command, discard result
 
-── Sequential (ONSTART / ONCE) ───────────────────────────
-TAG = value                  Write a fixed value
-TAG_C = TAG_A + TAG_B        Compute expression (live values)
-TAG_C = TAG_A - 10           Expression with literal
-RESPONSE = CMD_A(10, 20)     Call command, capture result
-RESPONSE = INVOQUE CMD(a)    Same with explicit INVOQUE
-IF VAR == "OK" THEN TAG = 1  Condition with == operator
-IF VAR == 100 THEN STOP_SCRIPT  Stop when condition is met
-SLEEP 1000                   Pause 1000 ms
+── Repeating intervals ───────────────────────────────────
+[TAG] = 100 EVERY 1000ms         Write value every interval
+[TAG] = [TAGA] + 10 EVERY 500ms  Write expression every interval
+[TAG] += 1 EVERY 500ms           Increment every interval
+[TAG] -= 1 EVERY 500ms           Decrement every interval
+[TAG] = (100,200,300) EVERY 1s   Rotate through values
+[Cmd](a, b) EVERY 2000ms         Invoke command every interval
+RESET [TAG]                      Stop active interval for tag/cmd
 
-── Time units ────────────────────────────────────────────
-500ms  |  10s  |  2m`;
+── Control ───────────────────────────────────────────────
+IF [TAG] == 1000 THEN [TAG2] = 0   Conditional (==, !=, >, <, >=, <=)
+IF [TAG] >= 500 THEN { [A]=0; [B]=1 }  Multi-statement THEN
+IF myVar == "err" THEN STOP SIMULATION
+SLEEP 1000                       Pause for 1000 ms
+STOP SIMULATION                  Stop the script
+
+── Operators ─────────────────────────────────────────────
++  -  *  /    arithmetic (standard precedence)
+// comment`;
 
 export default function ScriptPage() {
   const { connectionStatus } = useApp();
@@ -127,24 +139,31 @@ export default function ScriptPage() {
                 color: '#24292f',
               }}
             >
-{`ALWAYS {
-  TAG_A = 100 every 10s
-  TAG_B = +10 every 20s
-  INVOQUE CMD_A(1) every 30s
-}
+{`// Read current status
+status = [Sensor.Status]
 
-ONSTART {
-  RESPONSE = CMD_A(100, 200)
-  IF RESPONSE == 0 THEN TAG_A = 200
-  IF RESPONSE == "ERR" THEN STOP_SCRIPT
-  TAG_C = TAG_A + TAG_B
-  SLEEP 1000
-}
+// Write expression
+[Control.Setpoint] = [Sensor.InputA] + [Sensor.InputB]
 
-ONCE {
-  TAG_C = "2000"
-  IF TAG_A == 10000 THEN STOP_SCRIPT
-}`}
+// Rotating interval
+[Control.Mode] = (0,1,2) EVERY 2000ms
+
+// Increment counter every 500ms
+[Control.Counter] += 1 EVERY 500ms
+
+// Conditional reset
+IF [Sensor.Status] >= 1000 THEN [Control.Setpoint] = 0
+
+// Multi-statement conditional
+IF status == 0 THEN { [Control.Setpoint] = 100; [Control.Mode] = 1 }
+
+// Execute command
+[Control.Reset]()
+
+SLEEP 2000
+
+// Stop when done
+IF [Sensor.Status] == 0 THEN STOP SIMULATION`}
             </pre>
           </Card>
         </Col>

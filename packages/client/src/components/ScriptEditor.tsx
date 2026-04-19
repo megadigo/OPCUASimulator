@@ -1,52 +1,36 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
 
 const DSL_LANGUAGE_ID = 'opcua-sim';
 
 function registerLanguage(monaco: Monaco) {
-  // Avoid double-registration
   if (monaco.languages.getLanguages().some((l: any) => l.id === DSL_LANGUAGE_ID)) return;
 
   monaco.languages.register({ id: DSL_LANGUAGE_ID });
 
   monaco.languages.setMonarchTokensProvider(DSL_LANGUAGE_ID, {
-    keywords: ['ALWAYS', 'ONSTART', 'ONCE', 'INVOQUE', 'IF', 'THEN', 'SLEEP', 'each', 'EVERY', 'STOP_SCRIPT'],
     tokenizer: {
       root: [
-        // Comments
         [/\/\/.*$/, 'comment'],
-        [/#.*$/, 'comment'],
-        [/--.*$/, 'comment'],
 
-        // Block keywords
-        [/\b(ALWAYS|ONSTART|ONCE)\b/, 'keyword.block'],
+        [/\bSTOP\s+SIMULATION\b/, 'keyword.stop'],
+        [/\bRESET\b/, 'keyword.reset'],
+        [/\bIF\b|\bTHEN\b|\bSLEEP\b|\bEVERY\b/i, 'keyword.statement'],
 
-        // Stop keyword — prominent red
-        [/\bSTOP_SCRIPT\b/, 'keyword.stop'],
+        // [Name]( — command call
+        [/\[[^\]]+\](?=\s*\()/, 'identifier.command'],
+        // [Name] — tag reference
+        [/\[[^\]]+\]/, 'identifier.tag'],
 
-        // Statement keywords
-        [/\b(INVOQUE|IF|THEN|SLEEP)\b/, 'keyword.statement'],
+        [/"[^"]*"|'[^']*'/, 'string'],
+        [/\b(true|false)\b/, 'keyword.bool'],
+        [/\d+\s*ms\b/, 'number.time'],
+        [/\d+(\.\d+)?/, 'number'],
 
-        // Interval keywords
-        [/\b(each|EVERY)\b/i, 'keyword.interval'],
+        [/==|!=|>=|<=|>|</, 'operator.compare'],
+        [/\+=|-=/, 'operator.assign'],
+        [/[=+\-*\/(){};,]/, 'operator'],
 
-        // Time literals: 10s, 500ms, 2m
-        [/\d+\s*(ms|s|m)\b/, 'number.time'],
-
-        // Strings
-        [/"[^"]*"/, 'string'],
-        [/'[^']*'/, 'string'],
-
-        // Numbers (including signed +N / -N)
-        [/[+\-]?\d+(\.\d+)?/, 'number'],
-
-        // Double-equals operator (must come before single =)
-        [/==/, 'operator.compare'],
-
-        // Other operators
-        [/[=+\-*\/(){}]/, 'operator'],
-
-        // Identifiers (tag names, variable names, command names)
         [/[A-Za-z_]\w*/, 'identifier'],
       ],
     },
@@ -56,17 +40,20 @@ function registerLanguage(monaco: Monaco) {
     base: 'vs',
     inherit: true,
     rules: [
-      { token: 'keyword.block',    foreground: '0550ae', fontStyle: 'bold' },
-      { token: 'keyword.statement',foreground: '8250df', fontStyle: 'bold' },
-      { token: 'keyword.interval', foreground: 'cf222e', fontStyle: 'italic' },
-      { token: 'keyword.stop',     foreground: 'ff0000', fontStyle: 'bold' },
-      { token: 'number.time',      foreground: '116329' },
-      { token: 'number',           foreground: '116329' },
-      { token: 'string',           foreground: '0a3069' },
-      { token: 'identifier',       foreground: '24292f' },
-      { token: 'operator',         foreground: '6e7781' },
-      { token: 'operator.compare', foreground: 'cf222e', fontStyle: 'bold' },
-      { token: 'comment',          foreground: '6e7781', fontStyle: 'italic' },
+      { token: 'keyword.stop',      foreground: 'cf222e', fontStyle: 'bold' },
+      { token: 'keyword.reset',     foreground: 'cf222e', fontStyle: 'bold' },
+      { token: 'keyword.statement', foreground: '8250df', fontStyle: 'bold' },
+      { token: 'keyword.bool',      foreground: '0550ae' },
+      { token: 'identifier.tag',    foreground: '0550ae', fontStyle: 'bold' },
+      { token: 'identifier.command',foreground: '8250df', fontStyle: 'bold' },
+      { token: 'number.time',       foreground: '116329' },
+      { token: 'number',            foreground: '116329' },
+      { token: 'string',            foreground: '0a3069' },
+      { token: 'identifier',        foreground: '24292f' },
+      { token: 'operator',          foreground: '6e7781' },
+      { token: 'operator.compare',  foreground: 'cf222e', fontStyle: 'bold' },
+      { token: 'operator.assign',   foreground: 'cf222e' },
+      { token: 'comment',           foreground: '6e7781', fontStyle: 'italic' },
     ],
     colors: {
       'editor.background': '#f6f8fa',
@@ -74,7 +61,6 @@ function registerLanguage(monaco: Monaco) {
     },
   });
 
-  // Auto-completion
   monaco.languages.registerCompletionItemProvider(DSL_LANGUAGE_ID, {
     provideCompletionItems: (model: any, position: any) => {
       const word = model.getWordUntilPosition(position);
@@ -87,67 +73,107 @@ function registerLanguage(monaco: Monaco) {
 
       const snippets = [
         {
-          label: 'ALWAYS',
+          label: 'TAG_WRITE',
           kind: monaco.languages.CompletionItemKind.Snippet,
-          insertText: 'ALWAYS {\n\t${1:TAGNAME} = ${2:value} each ${3:10s}\n}',
+          insertText: '[${1:TagName}] = ${2:value}',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: 'Run statements repeatedly at defined intervals',
+          documentation: 'Write a value to a tag',
           range,
         },
         {
-          label: 'ONSTART',
+          label: 'TAG_INCREMENT',
           kind: monaco.languages.CompletionItemKind.Snippet,
-          insertText: 'ONSTART {\n\t${1:TAGNAME} = ${2:value}\n}',
+          insertText: '[${1:TagName}] += ${2:1}',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: 'Run statements once at script start',
+          documentation: 'Increment a tag value',
           range,
         },
         {
-          label: 'ONCE',
+          label: 'TAG_INTERVAL',
           kind: monaco.languages.CompletionItemKind.Snippet,
-          insertText: 'ONCE {\n\t${1:TAGNAME} = ${2:value}\n}',
+          insertText: '[${1:TagName}] = ${2:value} EVERY ${3:1000}ms',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: 'Run statements once after ONSTART',
+          documentation: 'Write a value to a tag on a repeating interval',
           range,
         },
         {
-          label: 'INVOQUE',
+          label: 'TAG_INCREMENT_INTERVAL',
           kind: monaco.languages.CompletionItemKind.Snippet,
-          insertText: 'INVOQUE ${1:COMMAND}(${2:args})',
+          insertText: '[${1:TagName}] += ${2:1} EVERY ${3:1000}ms',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: 'Invoke an OPC UA command/method',
+          documentation: 'Increment a tag on a repeating interval',
           range,
         },
         {
-          label: 'IF...THEN (write tag)',
+          label: 'TAG_ROTATE',
           kind: monaco.languages.CompletionItemKind.Snippet,
-          insertText: 'IF ${1:VAR} == ${2:value} THEN ${3:TAGNAME} = ${4:value}',
+          insertText: '[${1:TagName}] = (${2:100,200,300}) EVERY ${3:1000}ms',
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          documentation: 'Rotate through a list of values on an interval',
+          range,
+        },
+        {
+          label: 'VAR_ASSIGN',
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: '${1:myVar} = [${2:TagName}]',
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          documentation: 'Read a tag value into a variable',
+          range,
+        },
+        {
+          label: 'CMD_INVOKE',
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: '[${1:CmdName}](${2:args})',
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          documentation: 'Invoke a command',
+          range,
+        },
+        {
+          label: 'CMD_ASSIGN',
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: '${1:myVar} = [${2:CmdName}](${3:args})',
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          documentation: 'Invoke a command and store the result',
+          range,
+        },
+        {
+          label: 'CMD_INTERVAL',
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: '[${1:CmdName}](${2:args}) EVERY ${3:1000}ms',
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          documentation: 'Invoke a command on a repeating interval',
+          range,
+        },
+        {
+          label: 'IF_THEN',
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: 'IF [${1:TagName}] == ${2:value} THEN [${3:TagName}] = ${4:value}',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           documentation: 'Conditional tag write',
           range,
         },
         {
-          label: 'IF...THEN STOP_SCRIPT',
+          label: 'IF_THEN_BLOCK',
           kind: monaco.languages.CompletionItemKind.Snippet,
-          insertText: 'IF ${1:VAR} == ${2:value} THEN STOP_SCRIPT',
+          insertText: 'IF [${1:TagName}] == ${2:value} THEN { [${3:TagName}] = ${4:value}; [${5:TagName}] = ${6:value} }',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: 'Stop the script when a condition is met',
+          documentation: 'Conditional with multiple statements',
           range,
         },
         {
-          label: 'TAG increment (ALWAYS)',
+          label: 'IF_STOP',
           kind: monaco.languages.CompletionItemKind.Snippet,
-          insertText: '${1:TAGNAME} = +${2:1} every ${3:10s}',
+          insertText: 'IF [${1:TagName}] == ${2:value} THEN STOP SIMULATION',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: 'Increment a tag by a fixed amount on each tick',
+          documentation: 'Stop the simulation when condition is met',
           range,
         },
         {
-          label: 'TAG expression',
+          label: 'RESET',
           kind: monaco.languages.CompletionItemKind.Snippet,
-          insertText: '${1:TAG_C} = ${2:TAG_A} + ${3:TAG_B}',
+          insertText: 'RESET [${1:TagName}]',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: 'Write the sum of two tags (resolved at runtime)',
+          documentation: 'Stop the active interval for a tag or command',
           range,
         },
         {
@@ -155,7 +181,14 @@ function registerLanguage(monaco: Monaco) {
           kind: monaco.languages.CompletionItemKind.Snippet,
           insertText: 'SLEEP ${1:1000}',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: 'Pause execution (milliseconds)',
+          documentation: 'Pause execution for N milliseconds',
+          range,
+        },
+        {
+          label: 'STOP SIMULATION',
+          kind: monaco.languages.CompletionItemKind.Keyword,
+          insertText: 'STOP SIMULATION',
+          documentation: 'Stop the running script',
           range,
         },
       ];
@@ -164,26 +197,57 @@ function registerLanguage(monaco: Monaco) {
   });
 }
 
-const DEFAULT_SCRIPT = `// OPC UA Simulator Script
-// Use ALWAYS for repeating actions, ONSTART for startup, ONCE for one-time setup.
+export const DEFAULT_SCRIPT = `// OPC UA Simulator Script
+// Tags: [TagName]    Commands: [CmdName](args)
 
-ALWAYS {
-  // TAG_A = 100 every 10s           set TAG_A to 100 every 10 seconds
-  // TAG_B = +10 every 20s           increment TAG_B by 10 every 20 seconds
-  // INVOQUE CMD_A(1, 2) every 30s   invoke command every 30 seconds
-}
+// Write static value
+// [MyTag.Setpoint] = 100
 
-ONSTART {
-  // RESPONSE = CMD_A(100, 200)      call command, capture result
-  // IF RESPONSE == 0 THEN TAG_A = 200
-  // IF RESPONSE == "OK" THEN STOP_SCRIPT
-  // TAG_C = TAG_A + TAG_B           write sum of two tags
-  // SLEEP 1000                      pause 1000ms
-}
+// Write expression
+// [MyTag.Output] = [MyTag.InputA] + [MyTag.InputB]
 
-ONCE {
-  // TAG_C = "initial value"
-}
+// Read tag into variable
+// status = [MyTag.Status]
+
+// Execute command
+// [MyCmd.Reset]()
+
+// Execute command and store result
+// result = [MyCmd.GetValue](10, 20)
+
+// Increment / decrement
+// [MyTag.Counter] += 1
+// [MyTag.Counter] -= 1
+
+// Repeating interval — write value every 1s
+// [MyTag.Setpoint] = 100 EVERY 1000ms
+
+// Repeating increment every 500ms
+// [MyTag.Counter] += 1 EVERY 500ms
+
+// Rotate values every 2s
+// [MyTag.Mode] = (0,1,2) EVERY 2000ms
+
+// Repeat command every 5s
+// [MyCmd.Ping]() EVERY 5000ms
+
+// Stop an active interval
+// RESET [MyTag.Counter]
+
+// Conditional (single statement)
+// IF [MyTag.Status] == 1000 THEN [MyTag.Setpoint] = 0
+
+// Conditional (multiple statements)
+// IF [MyTag.Status] >= 500 THEN { [MyTag.Setpoint] = 0; [MyTag.Mode] = 1 }
+
+// Conditional stop
+// IF [MyTag.Status] == 0 THEN STOP SIMULATION
+
+// Pause 1 second
+// SLEEP 1000
+
+// Stop the simulation
+// STOP SIMULATION
 `;
 
 interface Props {
@@ -223,5 +287,3 @@ export default function ScriptEditor({ value, onChange }: Props) {
     </div>
   );
 }
-
-export { DEFAULT_SCRIPT };
