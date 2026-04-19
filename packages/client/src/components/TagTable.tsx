@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import '../flash.css';
 import {
   Table, Button, Space, Tag, Tooltip, Input, Typography, Alert,
 } from 'antd';
@@ -13,6 +14,7 @@ import { writeTag, deleteInterval } from '../services/api';
 import { useApp } from '../App';
 import TagIntervalModal from './TagIntervalModal';
 import { message } from 'antd';
+import { getSocket } from '../services/socket';
 
 const FILTER_STORAGE_KEY = 'opcua-sim-tag-filter-v2';
 
@@ -130,6 +132,19 @@ function EditCell({ tag, onSaved, hasInterval }: { tag: TagInfo; onSaved: () => 
 export default function TagTable() {
   const { tags, intervals, setIntervals, reloadData } = useApp();
   const [intervalTag, setIntervalTag] = useState<TagInfo | null>(null);
+  const [flashingIds, setFlashingIds] = useState<Set<string>>(new Set());
+
+  const flash = useCallback((nodeId: string) => {
+    setFlashingIds((prev) => new Set([...prev, nodeId]));
+    setTimeout(() => setFlashingIds((prev) => { const n = new Set(prev); n.delete(nodeId); return n; }), 750);
+  }, []);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const handler = (data: any) => { if (data.type === 'tag' && data.nodeId) flash(data.nodeId); };
+    socket.on('interval:tick', handler);
+    return () => { socket.off('interval:tick', handler); };
+  }, [flash]);
 
   // Checkbox selection (node IDs of checked rows)
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
@@ -374,6 +389,7 @@ export default function TagTable() {
         rowKey="nodeId"
         size="small"
         rowSelection={rowSelection}
+        rowClassName={(record) => flashingIds.has(record.nodeId) ? 'row-flash' : ''}
         pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} tags` }}
         locale={{ emptyText: filterApplied ? 'No tags match the applied filter' : 'No tags — connect to an OPC UA server first' }}
       />

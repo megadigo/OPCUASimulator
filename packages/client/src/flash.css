@@ -1,0 +1,8 @@
+@keyframes row-flash {
+  0%   { background-color: rgba(82, 196, 26, 0.35); }
+  100% { background-color: transparent; }
+}
+
+.row-flash td {
+  animation: row-flash 700ms ease-out forwards;
+}

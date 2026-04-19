@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import '../flash.css';
 import {
   Table, Button, Space, Tag, Tooltip, Modal, Form, Input, Typography, Divider, Alert,
 } from 'antd';
@@ -9,6 +10,7 @@ import type { ColumnType } from 'antd/es/table';
 import { CommandInfo, IntervalEntry } from '../types';
 import { invokeCommand, deleteInterval } from '../services/api';
 import { useApp } from '../App';
+import { getSocket } from '../services/socket';
 import CommandIntervalModal from './CommandIntervalModal';
 import { message } from 'antd';
 
@@ -22,9 +24,11 @@ interface InvokeResult {
 function InvokeModal({
   command,
   onClose,
+  onFlash,
 }: {
   command: CommandInfo | null;
   onClose: () => void;
+  onFlash: (name: string) => void;
 }) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -43,11 +47,13 @@ function InvokeModal({
     setLoading(true);
     try {
       const res = await invokeCommand(command!.objectId, command!.nodeId, args);
+      const ok = res.status.includes('Good');
+      if (ok) onFlash(command!.displayName);
       setResult({
         commandName: command!.displayName,
         status: res.status,
         outputs: res.outputs,
-        ok: res.status.includes('Good'),
+        ok,
       });
     } catch (err: any) {
       setResult({
@@ -127,6 +133,19 @@ export default function CommandPanel() {
   const { commands, intervals, setIntervals } = useApp();
   const [invokeCmd, setInvokeCmd] = useState<CommandInfo | null>(null);
   const [intervalCmd, setIntervalCmd] = useState<CommandInfo | null>(null);
+  const [flashingNames, setFlashingNames] = useState<Set<string>>(new Set());
+
+  const flash = useCallback((name: string) => {
+    setFlashingNames((prev) => new Set([...prev, name]));
+    setTimeout(() => setFlashingNames((prev) => { const n = new Set(prev); n.delete(name); return n; }), 750);
+  }, []);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const handler = (data: any) => { if (data.type === 'command' && data.commandName) flash(data.commandName); };
+    socket.on('interval:tick', handler);
+    return () => { socket.off('interval:tick', handler); };
+  }, [flash]);
 
   const commandIntervals = intervals.filter((i) => i.type === 'command');
 
@@ -230,12 +249,13 @@ export default function CommandPanel() {
         columns={columns}
         rowKey="nodeId"
         size="small"
+        rowClassName={(record) => flashingNames.has(record.displayName) ? 'row-flash' : ''}
         pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `${t} commands` }}
         scroll={{ y: 340 }}
         locale={{ emptyText: 'No commands — connect to an OPC UA server first' }}
       />
 
-<InvokeModal command={invokeCmd} onClose={() => setInvokeCmd(null)} />
+      <InvokeModal command={invokeCmd} onClose={() => setInvokeCmd(null)} onFlash={flash} />
       <CommandIntervalModal command={intervalCmd} onClose={() => setIntervalCmd(null)} />
     </>
   );
