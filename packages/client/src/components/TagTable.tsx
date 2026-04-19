@@ -296,12 +296,12 @@ export default function TagTable() {
       key: 'displayName',
       sorter: (a, b) => a.displayName.localeCompare(b.displayName),
       render: (name) => <Typography.Text strong>{name}</Typography.Text>,
-      width: '26%',
+      width: '38%',
     },
     {
       title: 'Current Value',
       key: 'value',
-      width: '28%',
+      width: '22%',
       render: (_, record) => (
         <EditCell
           tag={record}
@@ -314,7 +314,7 @@ export default function TagTable() {
       title: 'Type',
       dataIndex: 'dataType',
       key: 'dataType',
-      width: '12%',
+      width: '9%',
       render: (dt) => (
         <Tag style={{ fontSize: 11 }}>
           {resolveDataTypeLabel(dt)}
@@ -325,7 +325,7 @@ export default function TagTable() {
       title: 'Access',
       dataIndex: 'accessLevel',
       key: 'accessLevel',
-      width: '10%',
+      width: '7%',
       render: (level) => <AccessBadge level={level} />,
     },
     {
