@@ -92,7 +92,8 @@ router.post('/commands/invoke', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'objectId and methodId are required' });
   }
   try {
-    const result = await invokeCommand(objectId, methodId, args || []);
+    const cmd = getCachedCommands().find((c) => c.nodeId === methodId);
+    const result = await invokeCommand(objectId, methodId, args || [], cmd?.inputArguments);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
