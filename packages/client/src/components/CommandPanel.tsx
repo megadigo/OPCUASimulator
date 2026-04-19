@@ -254,7 +254,7 @@ export default function CommandPanel() {
         rowKey="nodeId"
         size="small"
         rowClassName={(record) => flashingNames.has(record.displayName) ? 'row-flash' : ''}
-        pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `${t} commands` }}
+        pagination={{ defaultPageSize: 10, showSizeChanger: true, showTotal: (t) => `${t} commands` }}
         scroll={{ y: 340 }}
         locale={{ emptyText: 'No commands — connect to an OPC UA server first' }}
       />

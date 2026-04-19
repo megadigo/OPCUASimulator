@@ -435,7 +435,7 @@ export default function TagTable() {
         size="small"
         rowSelection={rowSelection}
         rowClassName={(record) => flashingIds.has(record.nodeId) ? 'row-flash' : ''}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} tags` }}
+        pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} tags` }}
         locale={{ emptyText: filterApplied ? 'No tags match the applied filter' : searchToken ? `No tags match "${searchToken}"` : 'No tags — connect to an OPC UA server first' }}
       />
 
