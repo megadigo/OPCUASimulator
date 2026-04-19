@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { ConfigProvider, Layout, Menu, theme } from 'antd';
-import { DashboardOutlined, CodeOutlined, WifiOutlined } from '@ant-design/icons';
+import { DashboardOutlined, CodeOutlined, WifiOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import DashboardPage from './pages/DashboardPage';
 import ScriptPage from './pages/ScriptPage';
+import HelpPage from './pages/HelpPage';
 import { ConnectionStatus, TagInfo, CommandInfo, IntervalEntry } from './types';
 import { getSocket } from './services/socket';
 import { getTags, getCommands, getIntervals, getStatus } from './services/api';
@@ -56,6 +57,7 @@ function NavMenu() {
         items={[
           { key: '/', icon: <DashboardOutlined />, label: <Link to="/">Dashboard</Link> },
           { key: '/script', icon: <CodeOutlined />, label: <Link to="/script">Script Editor</Link> },
+          { key: '/help', icon: <QuestionCircleOutlined />, label: <Link to="/help">Help</Link> },
         ]}
       />
     </div>
@@ -150,6 +152,7 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<DashboardPage />} />
                 <Route path="/script" element={<ScriptPage />} />
+                <Route path="/help" element={<HelpPage />} />
               </Routes>
             </Layout.Content>
           </Layout>
