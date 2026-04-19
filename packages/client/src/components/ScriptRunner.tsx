@@ -24,7 +24,7 @@ export default function ScriptRunner({ content }: Props) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [parseErrors, setParseErrors] = useState<ParseError[]>([]);
   const [validating, setValidating] = useState(false);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const socket = getSocket();
@@ -45,7 +45,8 @@ export default function ScriptRunner({ content }: Props) {
   }, []);
 
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = logContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [logs]);
 
   const handleValidate = async () => {
@@ -164,6 +165,7 @@ export default function ScriptRunner({ content }: Props) {
 
       {/* Execution log */}
       <div
+        ref={logContainerRef}
         style={{
           background: '#1a1a1a',
           borderRadius: 6,
@@ -190,7 +192,6 @@ export default function ScriptRunner({ content }: Props) {
             </div>
           ))
         )}
-        <div ref={logEndRef} />
       </div>
     </div>
   );

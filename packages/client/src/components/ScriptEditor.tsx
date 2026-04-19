@@ -15,6 +15,7 @@ function registerLanguage(monaco: Monaco) {
 
         [/\bSTOP\s+SIMULATION\b/, 'keyword.stop'],
         [/\bRESET\b/, 'keyword.reset'],
+        [/\bSETUP\b|\bLOOP\b|\bTEARDOWN\b/, 'keyword.block'],
         [/\bIF\b|\bTHEN\b|\bSLEEP\b|\bEVERY\b/i, 'keyword.statement'],
 
         // [Name]( — command call
@@ -42,6 +43,7 @@ function registerLanguage(monaco: Monaco) {
     rules: [
       { token: 'keyword.stop',      foreground: 'cf222e', fontStyle: 'bold' },
       { token: 'keyword.reset',     foreground: 'cf222e', fontStyle: 'bold' },
+      { token: 'keyword.block',     foreground: '0550ae', fontStyle: 'bold' },
       { token: 'keyword.statement', foreground: '8250df', fontStyle: 'bold' },
       { token: 'keyword.bool',      foreground: '0550ae' },
       { token: 'identifier.tag',    foreground: '0550ae', fontStyle: 'bold' },
@@ -72,6 +74,30 @@ function registerLanguage(monaco: Monaco) {
       };
 
       const snippets = [
+        {
+          label: 'SETUP',
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: 'SETUP {\n\t${1:// runs once at start}\n}',
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          documentation: 'Run once at the beginning of the simulation',
+          range,
+        },
+        {
+          label: 'LOOP',
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: 'LOOP {\n\t${1:// repeats continuously}\n}',
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          documentation: 'Repeat continuously while simulation is running',
+          range,
+        },
+        {
+          label: 'TEARDOWN',
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: 'TEARDOWN {\n\t${1:// runs once before simulation stops}\n}',
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          documentation: 'Run once before the simulation stops',
+          range,
+        },
         {
           label: 'TAG_WRITE',
           kind: monaco.languages.CompletionItemKind.Snippet,
@@ -200,54 +226,23 @@ function registerLanguage(monaco: Monaco) {
 export const DEFAULT_SCRIPT = `// OPC UA Simulator Script
 // Tags: [TagName]    Commands: [CmdName](args)
 
-// Write static value
-// [MyTag.Setpoint] = 100
+SETUP {
+  // Runs once at the start of the simulation
 
-// Write expression
-// [MyTag.Output] = [MyTag.InputA] + [MyTag.InputB]
 
-// Read tag into variable
-// status = [MyTag.Status]
+}
 
-// Execute command
-// [MyCmd.Reset]()
+LOOP {
+  // Repeats continuously while the simulation is running
 
-// Execute command and store result
-// result = [MyCmd.GetValue](10, 20)
 
-// Increment / decrement
-// [MyTag.Counter] += 1
-// [MyTag.Counter] -= 1
+}
 
-// Repeating interval — write value every 1s
-// [MyTag.Setpoint] = 100 EVERY 1000ms
+TEARDOWN {
+  // Runs once before the simulation stops
 
-// Repeating increment every 500ms
-// [MyTag.Counter] += 1 EVERY 500ms
 
-// Rotate values every 2s
-// [MyTag.Mode] = (0,1,2) EVERY 2000ms
-
-// Repeat command every 5s
-// [MyCmd.Ping]() EVERY 5000ms
-
-// Stop an active interval
-// RESET [MyTag.Counter]
-
-// Conditional (single statement)
-// IF [MyTag.Status] == 1000 THEN [MyTag.Setpoint] = 0
-
-// Conditional (multiple statements)
-// IF [MyTag.Status] >= 500 THEN { [MyTag.Setpoint] = 0; [MyTag.Mode] = 1 }
-
-// Conditional stop
-// IF [MyTag.Status] == 0 THEN STOP SIMULATION
-
-// Pause 1 second
-// SLEEP 1000
-
-// Stop the simulation
-// STOP SIMULATION
+}
 `;
 
 interface Props {

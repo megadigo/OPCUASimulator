@@ -18,6 +18,7 @@ class ScriptExecutor {
   private stopRequested = false;
   private sleepReject: (() => void) | null = null;
   private activeIntervals = new Map<string, NodeJS.Timeout>();
+  private activeIntervalMs  = new Map<string, number>();
 
   setSocketIO(io: SocketIOServer): void { this.io = io; }
   getStatus(): ScriptStatus { return this.status; }
@@ -28,8 +29,8 @@ class ScriptExecutor {
     if (this.io) this.io.emit('script:log', entry);
   }
 
-  private emitStatus(running: boolean): void {
-    if (this.io) this.io.emit('script:status', { running, block: running ? 'running' : null });
+  private emitStatus(running: boolean, block: string | null = null): void {
+    if (this.io) this.io.emit('script:status', { running, block });
   }
 
   private sleep(ms: number): Promise<void> {
@@ -86,12 +87,20 @@ class ScriptExecutor {
     }
   }
 
-  private scheduleRepeat(key: string, intervalMs: number, fn: () => Promise<void>): void {
+  private isIntervalActive(key: string, intervalMs: number): boolean {
+    return this.activeIntervals.has(key) && this.activeIntervalMs.get(key) === intervalMs;
+  }
+
+  private scheduleRepeat(key: string, intervalMs: number, fn: () => Promise<void>): boolean {
+    if (this.isIntervalActive(key, intervalMs)) return false;
+
     const existing = this.activeIntervals.get(key);
     if (existing) clearTimeout(existing);
 
+    this.activeIntervalMs.set(key, intervalMs);
+
     const tick = async () => {
-      if (this.stopRequested) { this.activeIntervals.delete(key); return; }
+      if (this.stopRequested) { this.activeIntervals.delete(key); this.activeIntervalMs.delete(key); return; }
       try { await fn(); } catch (err: any) {
         this.log('error', `[Interval:${key}] ${err.message}`);
       }
@@ -99,9 +108,11 @@ class ScriptExecutor {
         this.activeIntervals.set(key, setTimeout(tick, intervalMs));
       } else {
         this.activeIntervals.delete(key);
+        this.activeIntervalMs.delete(key);
       }
     };
     this.activeIntervals.set(key, setTimeout(tick, intervalMs));
+    return true;
   }
 
   private async execStatement(stmt: Statement, vars: Record<string, unknown>): Promise<void> {
@@ -114,7 +125,6 @@ class ScriptExecutor {
       }
 
       case 'SLEEP': {
-        this.log('info', `SLEEP ${stmt.ms}ms`);
         try { await this.sleep(stmt.ms); } catch { /* interrupted by stop */ }
         break;
       }
@@ -124,6 +134,7 @@ class ScriptExecutor {
         if (t) {
           clearTimeout(t);
           this.activeIntervals.delete(stmt.name);
+          this.activeIntervalMs.delete(stmt.name);
           this.log('info', `RESET [${stmt.name}] — interval stopped`);
         } else {
           this.log('warn', `RESET [${stmt.name}] — no active interval found`);
@@ -149,6 +160,7 @@ class ScriptExecutor {
 
       case 'TAG_INTERVAL': {
         const { tagName, expr, intervalMs } = stmt;
+        if (this.isIntervalActive(tagName, intervalMs)) break;
         this.log('info', `[${tagName}] = expr EVERY ${intervalMs}ms — interval started`);
         this.scheduleRepeat(tagName, intervalMs, async () => {
           const tag = this.resolveTag(tagName);
@@ -161,6 +173,7 @@ class ScriptExecutor {
 
       case 'TAG_ROTATE': {
         const { tagName, values, intervalMs } = stmt;
+        if (this.isIntervalActive(tagName, intervalMs)) break;
         let idx = 0;
         this.log('info', `[${tagName}] rotating ${values.length} values EVERY ${intervalMs}ms`);
         this.scheduleRepeat(tagName, intervalMs, async () => {
@@ -175,6 +188,7 @@ class ScriptExecutor {
 
       case 'TAG_INCREMENT_INTERVAL': {
         const { tagName, delta, intervalMs } = stmt;
+        if (this.isIntervalActive(tagName, intervalMs)) break;
         this.log('info', `[${tagName}] ${delta >= 0 ? '+=' : '-='} ${Math.abs(delta)} EVERY ${intervalMs}ms — interval started`);
         this.scheduleRepeat(tagName, intervalMs, async () => {
           const tag = this.resolveTag(tagName);
@@ -202,6 +216,7 @@ class ScriptExecutor {
 
       case 'CMD_INVOKE_INTERVAL': {
         const { cmdName, args, intervalMs } = stmt;
+        if (this.isIntervalActive(cmdName, intervalMs)) break;
         this.log('info', `[${cmdName}]() EVERY ${intervalMs}ms — interval started`);
         this.scheduleRepeat(cmdName, intervalMs, async () => {
           const cmd = this.resolveCmd(cmdName);
@@ -226,8 +241,8 @@ class ScriptExecutor {
         const left  = this.evalExpr(stmt.left,  vars);
         const right = this.evalExpr(stmt.right, vars);
         const cond  = this.compare(left, stmt.op, right);
-        this.log('info', `IF ${left} ${stmt.op} ${right} → ${cond ? 'true' : 'false'}`);
         if (cond) {
+          this.log('info', `IF ${left} ${stmt.op} ${right} → true`);
           for (const sub of stmt.body) {
             if (this.stopRequested) break;
             await this.execStatement(sub, vars);
@@ -238,42 +253,76 @@ class ScriptExecutor {
     }
   }
 
+  private async runBlock(stmts: Statement[], blockName: string, vars: Record<string, unknown>): Promise<void> {
+    this.emitStatus(true, blockName);
+    for (const stmt of stmts) {
+      if (this.stopRequested) break;
+      try { await this.execStatement(stmt, vars); }
+      catch (err: any) { this.log('error', `[${blockName}] ${err.message}`); }
+    }
+  }
+
   async run(script: ParsedScript): Promise<void> {
-    this.stop();
+    this.stopRequested = true;
+    if (this.sleepReject) { this.sleepReject(); this.sleepReject = null; }
+    for (const t of this.activeIntervals.values()) clearTimeout(t);
+    this.activeIntervals.clear();
+    this.activeIntervalMs.clear();
     this.stopRequested = false;
+
     this.status = 'running';
-    this.emitStatus(true);
     this.log('info', '══════════ Script started ══════════');
 
     const vars: Record<string, unknown> = {};
 
-    for (const stmt of script.statements) {
-      if (this.stopRequested) break;
-      try {
-        await this.execStatement(stmt, vars);
-      } catch (err: any) {
-        this.log('error', err.message);
-      }
+    // SETUP — runs once
+    if (script.setup.length > 0) {
+      this.log('info', '─── SETUP ───');
+      await this.runBlock(script.setup, 'SETUP', vars);
     }
 
-    if (this.activeIntervals.size > 0 && !this.stopRequested) {
-      this.log('info', `Sequential complete — ${this.activeIntervals.size} interval(s) running`);
-    } else {
-      this.status = 'stopped';
-      this.emitStatus(false);
-      this.log('info', '══════════ Script completed ══════════');
+    // LOOP — repeats until stopRequested
+    if (script.loop.length > 0 && !this.stopRequested) {
+      this.log('info', '─── LOOP started ───');
+      this.emitStatus(true, 'LOOP');
+      while (!this.stopRequested) {
+        await this.runBlock(script.loop, 'LOOP', vars);
+        // Yield to the macrotask queue so setTimeout callbacks (EVERY intervals)
+        // can fire even when the loop body does no async work.
+        if (!this.stopRequested) await new Promise<void>((r) => setTimeout(r, 0));
+      }
+      this.log('info', '─── LOOP ended ───');
     }
+
+    // TEARDOWN — runs once before final stop (even if stopRequested)
+    if (script.teardown.length > 0) {
+      this.log('info', '─── TEARDOWN ───');
+      const prevStop = this.stopRequested;
+      this.stopRequested = false;  // allow teardown to execute fully
+      this.emitStatus(true, 'TEARDOWN');
+      await this.runBlock(script.teardown, 'TEARDOWN', vars);
+      this.stopRequested = prevStop;
+    }
+
+    // Clean up any EVERY intervals started during script
+    for (const t of this.activeIntervals.values()) clearTimeout(t);
+    this.activeIntervals.clear();
+    this.activeIntervalMs.clear();
+
+    this.status = 'stopped';
+    this.emitStatus(false, null);
+    this.log('info', '══════════ Script completed ══════════');
   }
 
   stop(): void {
     this.stopRequested = true;
     if (this.sleepReject) { this.sleepReject(); this.sleepReject = null; }
-    for (const t of this.activeIntervals.values()) clearTimeout(t);
-    this.activeIntervals.clear();
-    if (this.status === 'running') {
-      this.status = 'stopped';
-      this.emitStatus(false);
-      this.log('info', '══════════ Script stopped ══════════');
+    // Intervals and status cleanup happen in run() after teardown completes.
+    // If run() is not active, clean up directly.
+    if (this.status !== 'running') {
+      for (const t of this.activeIntervals.values()) clearTimeout(t);
+      this.activeIntervals.clear();
+      this.activeIntervalMs.clear();
     }
   }
 }

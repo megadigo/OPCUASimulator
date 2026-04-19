@@ -1,0 +1,22 @@
+// OPC UA Simulator Script
+// Tags: [TagName]    Commands: [CmdName](args)
+
+SETUP {
+  // Runs once at the start of the simulation
+  [GVL_ConsumptionLocation_ColdGlue1-Status] = 0
+
+}
+
+LOOP {
+  // Repeats continuously while the simulation is running
+  [GVL_ConsumptionLocation_ColdGlue1-Status] += 1 EVERY 2000ms
+  IF [GVL_ConsumptionLocation_ColdGlue1-Status] == 10 THEN [GVL_ConsumptionLocation_ColdGlue1-Status] = 190
+  IF [GVL_ConsumptionLocation_ColdGlue1-Status] == 200 THEN STOP SIMULATION
+
+}
+
+TEARDOWN {
+  // Runs once before the simulation stops
+
+
+}

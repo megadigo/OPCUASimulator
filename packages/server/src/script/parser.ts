@@ -21,7 +21,11 @@ export type Statement =
   | { kind: 'SLEEP';                  ms: number }
   | { kind: 'STOP' };
 
-export interface ParsedScript { statements: Statement[]; }
+export interface ParsedScript {
+  setup:    Statement[];  // runs once before LOOP
+  loop:     Statement[];  // repeats continuously
+  teardown: Statement[];  // runs once before simulation stops
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -279,21 +283,36 @@ function parseStatement(line: string, lineNum: number): Statement | ParseError {
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
+type Block = 'SETUP' | 'LOOP' | 'TEARDOWN' | null;
+
 export function parseScript(content: string): { script?: ParsedScript; errors: ParseError[] } {
   const lines = content.split('\n');
   const errors: ParseError[] = [];
-  const statements: Statement[] = [];
+  const script: ParsedScript = { setup: [], loop: [], teardown: [] };
+
+  let currentBlock: Block = null;
 
   for (let i = 0; i < lines.length; i++) {
     const lineNum = i + 1;
     const line = lines[i].replace(/\/\/.*$/, '').trim();
     if (!line) continue;
 
+    if (/^SETUP\s*\{/i.test(line))    { currentBlock = 'SETUP';    continue; }
+    if (/^LOOP\s*\{/i.test(line))     { currentBlock = 'LOOP';     continue; }
+    if (/^TEARDOWN\s*\{/i.test(line)) { currentBlock = 'TEARDOWN'; continue; }
+    if (line === '}')                  { currentBlock = null;       continue; }
+
     const stmt = parseStatement(line, lineNum);
-    if ('message' in stmt) errors.push(stmt as ParseError);
-    else statements.push(stmt as Statement);
+    if ('message' in stmt) {
+      errors.push(stmt as ParseError);
+      continue;
+    }
+
+    // Flat statements outside any block go into setup
+    const target = currentBlock ?? 'SETUP';
+    script[target.toLowerCase() as 'setup' | 'loop' | 'teardown'].push(stmt as Statement);
   }
 
   if (errors.length > 0) return { errors };
-  return { script: { statements }, errors: [] };
+  return { script, errors: [] };
 }

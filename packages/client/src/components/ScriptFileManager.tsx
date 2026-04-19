@@ -1,13 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Button, Space, Dropdown, Modal, Input, Typography, List, Popconfirm, Tooltip,
-} from 'antd';
-import {
-  FileAddOutlined, FolderOpenOutlined, SaveOutlined, DeleteOutlined, FileOutlined,
-} from '@ant-design/icons';
-import { ScriptFile } from '../types';
-import { getScripts, saveScript, deleteScript, getScript } from '../services/api';
+import React, { useRef, useState } from 'react';
+import { Button, Space, Tooltip, Typography } from 'antd';
+import { FileAddOutlined, FolderOpenOutlined, SaveOutlined, FileOutlined } from '@ant-design/icons';
 import { message } from 'antd';
+
+// File System Access API — not in all TS libs, use window casts
+const hasFileSystemAccess = typeof (window as any).showSaveFilePicker === 'function';
 
 interface Props {
   currentName: string | null;
@@ -18,101 +15,119 @@ interface Props {
 }
 
 export default function ScriptFileManager({ currentName, setCurrentName, content, onLoad, onNew }: Props) {
-  const [scripts, setScripts] = useState<ScriptFile[]>([]);
-  const [openModalVisible, setOpenModalVisible] = useState(false);
-  const [saveAsVisible, setSaveAsVisible] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [fileHandle, setFileHandle] = useState<any>(null);
+  const openInputRef = useRef<HTMLInputElement>(null);
 
-  const loadScriptList = async () => {
-    try {
-      const list = await getScripts();
-      setScripts(list);
-    } catch {}
+  // ── Open ────────────────────────────────────────────────────────────────────
+
+  const handleOpen = async () => {
+    if (hasFileSystemAccess) {
+      try {
+        const [handle] = await (window as any).showOpenFilePicker({
+          types: [{ description: 'Simulator Scripts', accept: { 'text/plain': ['.sim'] } }],
+          multiple: false,
+        });
+        const file = await handle.getFile();
+        const text = await file.text();
+        const name = file.name.replace(/\.sim$/i, '');
+        setFileHandle(handle);
+        setCurrentName(name);
+        onLoad(text, name);
+        message.success(`Opened: ${file.name}`);
+      } catch (err: any) {
+        if (err.name !== 'AbortError') message.error(err.message);
+      }
+    } else {
+      openInputRef.current?.click();
+    }
   };
 
-  useEffect(() => { loadScriptList(); }, []);
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const name = file.name.replace(/\.sim$/i, '');
+      setCurrentName(name);
+      setFileHandle(null);
+      onLoad(reader.result as string, name);
+      message.success(`Opened: ${file.name}`);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  // ── Save ────────────────────────────────────────────────────────────────────
+
+  const writeToHandle = async (handle: any) => {
+    const writable = await handle.createWritable();
+    await writable.write(content);
+    await writable.close();
+  };
 
   const handleSave = async () => {
-    if (!currentName) { setSaveAsVisible(true); return; }
-    setSaving(true);
-    try {
-      await saveScript(currentName, content);
-      message.success(`Saved: ${currentName}`);
-    } catch (err: any) {
-      message.error(err.message);
-    } finally {
-      setSaving(false);
+    if (fileHandle) {
+      try {
+        await writeToHandle(fileHandle);
+        message.success(`Saved: ${currentName}.sim`);
+      } catch (err: any) {
+        if (err.name !== 'AbortError') message.error(err.message);
+      }
+    } else {
+      await handleSaveAs();
     }
   };
 
   const handleSaveAs = async () => {
-    if (!newName.trim()) { message.warning('Enter a script name'); return; }
-    setSaving(true);
-    try {
-      await saveScript(newName.trim(), content);
-      setCurrentName(newName.trim());
-      message.success(`Saved as: ${newName.trim()}`);
-      setSaveAsVisible(false);
-      setNewName('');
-      await loadScriptList();
-    } catch (err: any) {
-      message.error(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleOpen = async (name: string) => {
-    try {
-      const file = await getScript(name);
-      onLoad(file.content, file.name);
-      setOpenModalVisible(false);
-      message.success(`Loaded: ${name}`);
-    } catch (err: any) {
-      message.error(err.message);
-    }
-  };
-
-  const handleDelete = async (name: string) => {
-    try {
-      await deleteScript(name);
-      setScripts((prev) => prev.filter((s) => s.name !== name));
-      if (currentName === name) setCurrentName(null);
-      message.success(`Deleted: ${name}`);
-    } catch (err: any) {
-      message.error(err.message);
+    if (hasFileSystemAccess) {
+      try {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: `${currentName || 'script'}.sim`,
+          types: [{ description: 'Simulator Scripts', accept: { 'text/plain': ['.sim'] } }],
+        });
+        await writeToHandle(handle);
+        const name = (await handle.getFile()).name.replace(/\.sim$/i, '');
+        setFileHandle(handle);
+        setCurrentName(name);
+        message.success(`Saved: ${name}.sim`);
+      } catch (err: any) {
+        if (err.name !== 'AbortError') message.error(err.message);
+      }
+    } else {
+      // Fallback: trigger browser download
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${currentName || 'script'}.sim`;
+      a.click();
+      URL.revokeObjectURL(url);
     }
   };
 
   return (
     <>
+      {/* Hidden fallback file input for browsers without File System Access API */}
+      <input
+        ref={openInputRef}
+        type="file"
+        accept=".sim"
+        style={{ display: 'none' }}
+        onChange={handleFileInput}
+      />
+
       <Space wrap>
         <Tooltip title="New script">
-          <Button icon={<FileAddOutlined />} onClick={onNew}>New</Button>
+          <Button icon={<FileAddOutlined />} onClick={() => { setFileHandle(null); onNew(); }}>New</Button>
         </Tooltip>
 
-        <Button
-          icon={<FolderOpenOutlined />}
-          onClick={() => { loadScriptList(); setOpenModalVisible(true); }}
-        >
-          Open
-        </Button>
+        <Button icon={<FolderOpenOutlined />} onClick={handleOpen}>Open</Button>
 
-        <Button
-          icon={<SaveOutlined />}
-          type="primary"
-          ghost
-          onClick={handleSave}
-          loading={saving}
-        >
+        <Button icon={<SaveOutlined />} type="primary" ghost onClick={handleSave}>
           Save
         </Button>
 
-        <Button
-          icon={<SaveOutlined />}
-          onClick={() => { setNewName(currentName || ''); setSaveAsVisible(true); }}
-        >
+        <Button icon={<SaveOutlined />} onClick={handleSaveAs}>
           Save As…
         </Button>
 
@@ -123,69 +138,6 @@ export default function ScriptFileManager({ currentName, setCurrentName, content
           </Typography.Text>
         )}
       </Space>
-
-      {/* Open Script Modal */}
-      <Modal
-        open={openModalVisible}
-        onCancel={() => setOpenModalVisible(false)}
-        title={<Space><FolderOpenOutlined /> Open Script</Space>}
-        footer={<Button onClick={() => setOpenModalVisible(false)}>Close</Button>}
-      >
-        {scripts.length === 0 ? (
-          <Typography.Text type="secondary">No saved scripts yet.</Typography.Text>
-        ) : (
-          <List
-            dataSource={scripts}
-            renderItem={(s) => (
-              <List.Item
-                key={s.name}
-                actions={[
-                  <Button
-                    key="open"
-                    type="link"
-                    onClick={() => handleOpen(s.name)}
-                  >
-                    Open
-                  </Button>,
-                  <Popconfirm
-                    key="del"
-                    title={`Delete "${s.name}"?`}
-                    onConfirm={() => handleDelete(s.name)}
-                    okText="Delete"
-                    okButtonProps={{ danger: true }}
-                  >
-                    <Button type="link" danger icon={<DeleteOutlined />} />
-                  </Popconfirm>,
-                ]}
-              >
-                <List.Item.Meta
-                  avatar={<FileOutlined style={{ fontSize: 20, color: '#1677ff' }} />}
-                  title={`${s.name}.sim`}
-                  description={`Last saved: ${new Date(s.updatedAt).toLocaleString()}`}
-                />
-              </List.Item>
-            )}
-          />
-        )}
-      </Modal>
-
-      {/* Save As Modal */}
-      <Modal
-        open={saveAsVisible}
-        onCancel={() => setSaveAsVisible(false)}
-        title={<Space><SaveOutlined /> Save Script As</Space>}
-        onOk={handleSaveAs}
-        okText="Save"
-        confirmLoading={saving}
-      >
-        <Input
-          placeholder="Script name (no extension)"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onPressEnter={handleSaveAs}
-          autoFocus
-        />
-      </Modal>
     </>
   );
 }

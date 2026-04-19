@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import '../flash.css';
 import {
   Table, Button, Space, Tag, Tooltip, Input, Typography, Alert,
 } from 'antd';
 import {
   EditOutlined, ClockCircleOutlined, CheckOutlined, CloseOutlined,
-  SaveOutlined, FilterOutlined, ClearOutlined, SelectOutlined,
+  SaveOutlined, FilterOutlined, ClearOutlined, FolderOpenOutlined,
 } from '@ant-design/icons';
 import type { ColumnType } from 'antd/es/table';
 import type { TableRowSelection } from 'antd/es/table/interface';
@@ -16,7 +16,7 @@ import TagIntervalModal from './TagIntervalModal';
 import { message } from 'antd';
 import { getSocket } from '../services/socket';
 
-const FILTER_STORAGE_KEY = 'opcua-sim-tag-filter-v2';
+const hasFileSystemAccess = typeof (window as any).showSaveFilePicker === 'function';
 
 function matchesSearch(name: string, token: string): boolean {
   return name.toLowerCase().includes(token.toLowerCase());
@@ -141,10 +141,12 @@ export default function TagTable() {
 
   useEffect(() => {
     const socket = getSocket();
-    const handler = (data: any) => { if (data.type === 'tag' && data.nodeId) flash(data.nodeId); };
-    socket.on('interval:tick', handler);
-    return () => { socket.off('interval:tick', handler); };
+    const handler = (data: any) => { if (data.nodeId) flash(data.nodeId); };
+    socket.on('tag:update', handler);
+    return () => { socket.off('tag:update', handler); };
   }, [flash]);
+
+  const openInputRef = useRef<HTMLInputElement>(null);
 
   // Checkbox selection (node IDs of checked rows)
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
@@ -152,83 +154,120 @@ export default function TagTable() {
   // Whether the filter is currently applied (table restricted to checked rows)
   const [filterApplied, setFilterApplied] = useState(false);
 
-  // Glob pattern expression input
+  // Search input value
   const [pattern, setPattern] = useState('');
+  // Applied search token — filters visible rows (set on Enter)
+  const [searchToken, setSearchToken] = useState('');
 
-  // ── Restore saved filter on mount (once tags are loaded) ──────────────────
-  useEffect(() => {
-    if (tags.length === 0) return;
-    try {
-      const raw = localStorage.getItem(FILTER_STORAGE_KEY);
-      if (!raw) return;
-      const saved: { names: string[]; applied: boolean } = JSON.parse(raw);
-      const matchingIds = tags
-        .filter((t) => saved.names.includes(t.displayName))
-        .map((t) => t.nodeId);
-      if (matchingIds.length > 0) {
-        setCheckedKeys(matchingIds);
-        if (saved.applied) setFilterApplied(true);
-      }
-    } catch {}
-  }, [tags.length]); // re-run when tags first load
-
-  // ── Search token → select matching tags ──────────────────────────────────
-  const selectBySearch = () => {
-    const token = pattern.trim();
-    if (!token) {
-      message.warning('Enter a search term first');
-      return;
-    }
-    const matching = tags
-      .filter((t) => matchesSearch(t.displayName, token))
-      .map((t) => t.nodeId);
-    if (matching.length === 0) {
-      message.info('No tags matched the search');
-      return;
-    }
-    setCheckedKeys((prev) => [...new Set([...prev, ...matching])]);
-    message.success(`${matching.length} tag(s) selected`);
+  // ── Enter: filter visible rows by current pattern ─────────────────────────
+  const applySearch = () => {
+    setSearchToken(pattern.trim());
   };
 
-  // ── Apply / Save / Clear ──────────────────────────────────────────────────
+  // ── Apply / Change / Clear ────────────────────────────────────────────────
   const applyFilter = () => {
-    if (checkedKeys.length === 0) {
-      message.warning('Check at least one tag before applying the filter');
-      return;
-    }
+    if (checkedKeys.length === 0) { message.warning('Check at least one tag first'); return; }
     setFilterApplied(true);
-    message.success(`Filter applied — showing ${checkedKeys.length} of ${tags.length} tags`);
   };
 
-  const saveFilter = () => {
-    if (checkedKeys.length === 0) {
-      message.warning('Check at least one tag before saving');
-      return;
-    }
-    const names = tags.filter((t) => checkedKeys.includes(t.nodeId)).map((t) => t.displayName);
-    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({ names, applied: filterApplied }));
-    message.success('Filter saved — will be restored on next visit');
+  const changeFilter = () => {
+    setFilterApplied(false);
+    setSearchToken('');
+    setPattern('');
   };
 
   const clearFilter = () => {
     setFilterApplied(false);
     setCheckedKeys([]);
     setPattern('');
-    localStorage.removeItem(FILTER_STORAGE_KEY);
-    message.info('Filter cleared');
+    setSearchToken('');
+  };
+
+  // ── Save filter to file ───────────────────────────────────────────────────
+  const saveFilter = async () => {
+    if (checkedKeys.length === 0) { message.warning('Check at least one tag before saving'); return; }
+    const names = tags.filter((t) => checkedKeys.includes(t.nodeId)).map((t) => t.displayName);
+    const text = names.join('\n');
+
+    if (hasFileSystemAccess) {
+      try {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: 'filter.tags',
+          types: [{ description: 'Tag Filter', accept: { 'text/plain': ['.tags'] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(text);
+        await writable.close();
+        message.success(`Filter saved (${names.length} tags)`);
+      } catch (err: any) {
+        if (err.name !== 'AbortError') message.error(err.message);
+      }
+    } else {
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'filter.tags'; a.click();
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  // ── Load filter from file ─────────────────────────────────────────────────
+  const loadFilterFromText = (text: string) => {
+    const names = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    const matchingIds = tags.filter((t) => names.includes(t.displayName)).map((t) => t.nodeId);
+    if (matchingIds.length === 0) { message.warning('No matching tags found in file'); return; }
+    setCheckedKeys(matchingIds);
+    setFilterApplied(true);
+    message.success(`Filter loaded — ${matchingIds.length} tag(s) selected`);
+  };
+
+  const loadFilter = async () => {
+    if (hasFileSystemAccess) {
+      try {
+        const [handle] = await (window as any).showOpenFilePicker({
+          types: [{ description: 'Tag Filter', accept: { 'text/plain': ['.tags'] } }],
+          multiple: false,
+        });
+        const file = await handle.getFile();
+        loadFilterFromText(await file.text());
+      } catch (err: any) {
+        if (err.name !== 'AbortError') message.error(err.message);
+      }
+    } else {
+      openInputRef.current?.click();
+    }
+  };
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => loadFilterFromText(reader.result as string);
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   // ── Rows shown in the table ───────────────────────────────────────────────
   const visibleTags = filterApplied
     ? tags.filter((t) => checkedKeys.includes(t.nodeId))
-    : tags;
+    : searchToken
+      ? tags.filter((t) => matchesSearch(t.displayName, searchToken))
+      : tags;
 
   const checkedCount = checkedKeys.length;
 
   // ── Row selection config (Ant Design built-in checkboxes) ────────────────
   const rowSelection: TableRowSelection<TagInfo> = {
     selectedRowKeys: checkedKeys,
-    onChange: (keys) => setCheckedKeys(keys as string[]),
+    onChange: (keys) => {
+      // Only update the checked state for rows currently visible.
+      // Keys from previous searches (hidden rows) are preserved.
+      const visibleIds = new Set(visibleTags.map((t) => t.nodeId));
+      setCheckedKeys((prev) => [
+        ...prev.filter((k) => !visibleIds.has(k)),
+        ...(keys as string[]),
+      ]);
+    },
     selections: [
       Table.SELECTION_ALL,
       Table.SELECTION_NONE,
@@ -320,50 +359,56 @@ export default function TagTable() {
 
   return (
     <>
-      {/* ── Pattern selection toolbar ───────────────────────────────────── */}
+      {/* Hidden fallback file input */}
+      <input ref={openInputRef} type="file" accept=".tags" style={{ display: 'none' }} onChange={handleFileInput} />
+
+      {/* ── Search toolbar ─────────────────────────────────────────────── */}
       <Space wrap style={{ marginBottom: 8 }}>
         <FilterOutlined style={{ color: '#999' }} />
         <Input
           style={{ width: 240 }}
-          placeholder="Search tags by name..."
+          placeholder="Search tags by name — press Enter"
           value={pattern}
-          onChange={(e) => setPattern(e.target.value)}
-          onPressEnter={selectBySearch}
+          onChange={(e) => { setPattern(e.target.value); if (!e.target.value) setSearchToken(''); }}
+          onPressEnter={applySearch}
           allowClear
+          disabled={filterApplied}
         />
-        <Tooltip title="Select all tags whose name contains the search term (case-insensitive).">
-          <Button icon={<SelectOutlined />} onClick={selectBySearch}>
-            Select Matching
-          </Button>
-        </Tooltip>
       </Space>
 
       {/* ── Filter action buttons ───────────────────────────────────────── */}
       <Space wrap style={{ marginBottom: 10 }}>
-        <Button
-          type="primary"
-          icon={<FilterOutlined />}
-          onClick={applyFilter}
-          disabled={checkedCount === 0}
-        >
-          Apply Filter ({checkedCount} checked)
-        </Button>
-        <Button
-          icon={<SaveOutlined />}
-          onClick={saveFilter}
-          disabled={checkedCount === 0}
-        >
+        {filterApplied ? (
+          <Button icon={<FilterOutlined />} onClick={changeFilter}>
+            Change Filter
+          </Button>
+        ) : (
+          <Button
+            type="primary"
+            icon={<FilterOutlined />}
+            onClick={applyFilter}
+            disabled={checkedCount === 0}
+          >
+            Apply Filter{checkedCount > 0 ? ` (${checkedCount})` : ''}
+          </Button>
+        )}
+        <Button icon={<SaveOutlined />} onClick={saveFilter} disabled={checkedCount === 0}>
           Save Filter
         </Button>
+        <Button icon={<FolderOpenOutlined />} onClick={loadFilter}>
+          Load Filter
+        </Button>
         {(checkedCount > 0 || filterApplied) && (
-          <Button icon={<ClearOutlined />} onClick={clearFilter}>
-            Clear
-          </Button>
+          <Button icon={<ClearOutlined />} onClick={clearFilter}>Clear</Button>
         )}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {filterApplied
-            ? `Showing ${visibleTags.length} of ${tags.length} tags (filter active)`
-            : `${tags.length} tags  ·  ${checkedCount} checked`}
+            ? `Showing ${visibleTags.length} of ${tags.length} tags`
+            : searchToken
+              ? `${visibleTags.length} of ${tags.length} tags match "${searchToken}"${checkedCount > 0 ? ` · ${checkedCount} checked` : ''}`
+              : checkedCount > 0
+                ? `${tags.length} tags · ${checkedCount} checked`
+                : `${tags.length} tags`}
         </Typography.Text>
       </Space>
 
@@ -391,7 +436,7 @@ export default function TagTable() {
         rowSelection={rowSelection}
         rowClassName={(record) => flashingIds.has(record.nodeId) ? 'row-flash' : ''}
         pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} tags` }}
-        locale={{ emptyText: filterApplied ? 'No tags match the applied filter' : 'No tags — connect to an OPC UA server first' }}
+        locale={{ emptyText: filterApplied ? 'No tags match the applied filter' : searchToken ? `No tags match "${searchToken}"` : 'No tags — connect to an OPC UA server first' }}
       />
 
       <TagIntervalModal tag={intervalTag} onClose={() => setIntervalTag(null)} />
