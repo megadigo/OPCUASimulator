@@ -147,12 +147,12 @@ export default function CommandPanel() {
       key: 'displayName',
       sorter: (a, b) => a.displayName.localeCompare(b.displayName),
       render: (name) => <Typography.Text strong>{name}</Typography.Text>,
-      width: '35%',
+      width: '28%',
     },
     {
       title: 'Input Args',
       key: 'inputArgs',
-      width: '30%',
+      width: '24%',
       render: (_, record) =>
         record.inputArguments.length === 0 ? (
           <Typography.Text type="secondary">—</Typography.Text>
@@ -167,7 +167,7 @@ export default function CommandPanel() {
     {
       title: 'Output Args',
       key: 'outputArgs',
-      width: '25%',
+      width: '22%',
       render: (_, record) =>
         record.outputArguments.length === 0 ? (
           <Typography.Text type="secondary">—</Typography.Text>
@@ -180,28 +180,45 @@ export default function CommandPanel() {
         ),
     },
     {
+      title: 'Repeating Action',
+      key: 'interval',
+      width: '18%',
+      render: (_, record) => {
+        const active = commandIntervals.find((i) => i.commandName === record.displayName);
+        if (active) {
+          return (
+            <Tag
+              color="purple"
+              closable
+              onClose={() => handleRemoveInterval(active.id)}
+              style={{ fontSize: 11, maxWidth: '100%', whiteSpace: 'normal', lineHeight: '18px' }}
+            >
+              <ClockCircleOutlined style={{ marginRight: 4 }} />
+              {active.label}
+            </Tag>
+          );
+        }
+        return (
+          <Tooltip title="Set repeating interval">
+            <Button size="small" icon={<ClockCircleOutlined />} onClick={() => setIntervalCmd(record)} />
+          </Tooltip>
+        );
+      },
+    },
+    {
       title: '',
       key: 'actions',
-      width: '10%',
+      width: '8%',
       render: (_, record) => (
-        <Space>
-          <Tooltip title="Invoke command">
-            <Button
-              size="small"
-              type="primary"
-              ghost
-              icon={<PlayCircleOutlined />}
-              onClick={() => setInvokeCmd(record)}
-            />
-          </Tooltip>
-          <Tooltip title="Set repeating interval">
-            <Button
-              size="small"
-              icon={<ClockCircleOutlined />}
-              onClick={() => setIntervalCmd(record)}
-            />
-          </Tooltip>
-        </Space>
+        <Tooltip title="Invoke command">
+          <Button
+            size="small"
+            type="primary"
+            ghost
+            icon={<PlayCircleOutlined />}
+            onClick={() => setInvokeCmd(record)}
+          />
+        </Tooltip>
       ),
     },
   ];
@@ -218,27 +235,7 @@ export default function CommandPanel() {
         locale={{ emptyText: 'No commands — connect to an OPC UA server first' }}
       />
 
-      {commandIntervals.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>Active Intervals:</Typography.Text>
-          <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {commandIntervals.map((entry) => (
-              <Tag
-                key={entry.id}
-                color="purple"
-                closable
-                onClose={() => handleRemoveInterval(entry.id)}
-                style={{ fontSize: 12 }}
-              >
-                <ClockCircleOutlined style={{ marginRight: 4 }} />
-                {entry.label}
-              </Tag>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <InvokeModal command={invokeCmd} onClose={() => setInvokeCmd(null)} />
+<InvokeModal command={invokeCmd} onClose={() => setInvokeCmd(null)} />
       <CommandIntervalModal command={intervalCmd} onClose={() => setIntervalCmd(null)} />
     </>
   );
